@@ -22,9 +22,9 @@ vermeden, doğrudan bu belgelerden alıntılayarak verir.
    (kosinüs benzerliği ile)
 5. En benzer cümle bulunur ve cevap olarak gösterilir. Aynı belgeden
    ikinci bir cümle de neredeyse aynı derecede alakalıysa, o da eklenir
-6. **En yüksek benzerlik skoru belirli bir eşiğin altındaysa**, sistem
-   "Bu konuda bilgim yok" der. Böylece alakasız sorularda yanlış bilgi
-   uydurulmaz
+6. **En yüksek benzerlik skoru belirli bir eşiğin (0.40) altındaysa**,
+   sistem "Bu konuda bilgim yok" der. Böylece alakasız sorularda yanlış
+   bilgi uydurulmaz
 7. Cevabın altında kaynak dosya adı ve benzerlik skoru gösterilir
 
 ## Neden Sohbet Modeli Kullanılmadı?
@@ -94,7 +94,7 @@ Bu yaklaşıma "extractive" (alıntılayarak cevap verme) denir.
 - Asistan sadece bilgi bankasındaki 6 belgeyle sınırlıdır. Daha fazla
   konuyu bilmesi için yeni belgeler eklenip `veri_al.py` tekrar
   çalıştırılmalıdır.
-- Benzerlik eşiği (0.30) elle belirlenmiş bir değerdir. Farklı belge
+- Benzerlik eşiği (0.40) elle belirlenmiş bir değerdir. Farklı belge
   setlerinde farklı bir eşik daha iyi sonuç verebilir.
 - Belgeler değiştirilirse, güncel hâlini görmesi için `arayuz.py`
   yeniden başlatılmalıdır.
@@ -106,7 +106,8 @@ Bu yaklaşıma "extractive" (alıntılayarak cevap verme) denir.
   buldu).
 - En yüksek benzerlik skorunu bir eşikle karşılaştırmak, alakasız
   sorularda "bilmiyorum" demeyi ve yanlış bilgi uydurmayı (halüsinasyon)
-  önlemeyi sağlıyor.
+  önlemeyi sağlıyor. Eşik değeri deneme yanılmayla ayarlandı: 0.30
+  alakasız bir soruda yanlış cümle getirdi, 0.40 ile doğru çalıştı.
 - Küçük yapay zeka modelleri hızlı ve pratik olsa da, Türkçe gibi
   dillerde serbest cümle kurmada zayıf kalabiliyor. Talimatları
   değiştirmek yetmediğinde, modeli hiç kullanmayan bir yaklaşıma
