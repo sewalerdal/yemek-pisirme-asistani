@@ -1,5 +1,5 @@
+import re
 import sqlite3
-import json
 import numpy as np
 import tkinter as tk
 from tkinter import scrolledtext
@@ -15,78 +15,70 @@ embedding_model.download(lambda progress: None)
 embedding_model.load()
 embedding_client = embedding_model.get_embedding_client()
 
-sohbet_model = manager.catalog.get_model("phi-3.5-mini")
-sohbet_model.download(lambda progress: None)
-sohbet_model.load()
-sohbet_client = sohbet_model.get_chat_client()
-
-print("Modeller hazır, pencere açılıyor!")
-
-BENZERLIK_ESIGI = 0.28
+# Bu skorun altındaki sonuçlar "alakasız" kabul edilir
+BENZERLIK_ESIGI = 0.30
 
 # ---- RENK TEMASI ----
-ARKA_PLAN = "#F1F8F0"       # açık yeşilimsi ana arka plan
-BASLIK_RENGI = "#2E7D32"    # koyu yeşil başlık
-KULLANICI_RENGI = "#1B5E20" # koyu orman yeşili (kullanıcı yazısı)
-ASISTAN_RENGI = "#558B2F"   # açık zeytin yeşili (asistan yazısı)
+ARKA_PLAN = "#F1F8F0"
+BASLIK_RENGI = "#2E7D32"
+KULLANICI_RENGI = "#1B5E20"
+ASISTAN_RENGI = "#558B2F"
 BUTON_RENGI = "#2E7D32"
 
 
-def benzerlik_hesapla(v1, v2):
-    v1 = np.array(v1)
-    v2 = np.array(v2)
-    return np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2))
+def vektor_al(metin):
+    v = np.array(embedding_client.generate_embedding(metin).data[0].embedding)
+    return v / np.linalg.norm(v)  # uzunluğa bölüp normalize ediyoruz
 
 
-def en_alakali_belgeleri_bul(soru, kac_tane=1):
-    soru_vektor = embedding_client.generate_embedding(soru).data[0].embedding
+# ---- AÇILIŞTA: belgeleri cümlelere böl ve her cümlenin embedding'ini çıkar ----
+def cumleleri_hazirla():
     baglanti = sqlite3.connect("bilgi_bankasi.db")
     imlec = baglanti.cursor()
-    imlec.execute("SELECT dosya_adi, icerik, embedding FROM belgeler")
-    tum_belgeler = imlec.fetchall()
+    imlec.execute("SELECT dosya_adi, icerik FROM belgeler")
+    belgeler = imlec.fetchall()
     baglanti.close()
 
-    sonuclar = []
-    for dosya_adi, icerik, embedding_yazi in tum_belgeler:
-        belge_vektor = json.loads(embedding_yazi)
-        skor = benzerlik_hesapla(soru_vektor, belge_vektor)
-        sonuclar.append((skor, dosya_adi, icerik))
+    cumleler = []   # (dosya_adi, cumle) listesi
+    for dosya_adi, icerik in belgeler:
+        parcalar = re.split(r"(?<=[.!?])\s+", icerik.strip())
+        for parca in parcalar:
+            if len(parca.strip()) > 10:
+                cumleler.append((dosya_adi, parca.strip()))
 
-    sonuclar.sort(key=lambda x: x[0], reverse=True)
-    return sonuclar[:kac_tane]
+    print(f"{len(cumleler)} cümle hazırlanıyor...")
+    matris = np.array([vektor_al(c[1]) for c in cumleler])
+    return cumleler, matris
+
+
+CUMLELER, CUMLE_MATRISI = cumleleri_hazirla()
+print("Hazır, pencere açılıyor!")
 
 
 def soru_sor(soru):
-    bulunanlar = en_alakali_belgeleri_bul(soru, kac_tane=1)
+    soru_vektor = vektor_al(soru)
+    skorlar = CUMLE_MATRISI @ soru_vektor
 
-    en_yuksek_skor = bulunanlar[0][0]
+    sirali = np.argsort(skorlar)[::-1]
+    en_iyi = sirali[0]
+    en_yuksek_skor = float(skorlar[en_iyi])
+
     if en_yuksek_skor < BENZERLIK_ESIGI:
-        return "Bu konuda bilgim yok. Sadece yemek pişirme hakkında sorular sorabilirsiniz.", []
+        return "Bu konuda bilgim yok. Sadece yemek pişirme hakkında sorular sorabilirsiniz.", "", en_yuksek_skor
 
-    birlesik_bilgi = bulunanlar[0][2]
-    kaynaklar = [bulunanlar[0][1]]
+    secilenler = [en_iyi]
 
-    sistem_mesaji = (
-        "Sen bir yemek pişirme asistanısın. Sana bir BİLGİ metni verilecek. "
-        "Görevin, bu metni OLDUĞU GİBİ, kelimeleri neredeyse hiç değiştirmeden "
-        "kullanıcıya aktarmak. Yeni cümle kurma, yorum katma, ekleme yapma. "
-        "Sadece BİLGİ metnindeki cümleleri, soruya en uygun sırayla tekrar yaz. "
-        "Eğer BİLGİ, soruyla hiç alakalı değilse, 'Bu konuda bilgim yok' de.\n\n"
-        f"BİLGİ: {birlesik_bilgi}"
-    )
+    # İkinci en iyi cümle de neredeyse aynı derecede alakalıysa ve aynı belgedense onu da ekle
+    ikinci = sirali[1]
+    if (skorlar[ikinci] >= 0.85 * en_yuksek_skor
+            and CUMLELER[ikinci][0] == CUMLELER[en_iyi][0]):
+        secilenler.append(ikinci)
 
-    yanit = sohbet_client.complete_chat([
-        {"role": "system", "content": sistem_mesaji},
-        {"role": "user", "content": soru}
-    ])
+    secilenler.sort()  # belgedeki orijinal sıraya göre diz
+    cevap = " ".join(CUMLELER[i][1] for i in secilenler)
+    kaynak = CUMLELER[en_iyi][0]
 
-    tam_cevap = yanit.choices[0].message.content
-    cumleler = tam_cevap.split(". ")
-    kisa_cevap = ". ".join(cumleler[:2])
-    if not kisa_cevap.endswith("."):
-        kisa_cevap += "."
-
-    return kisa_cevap, kaynaklar
+    return cevap, kaynak, en_yuksek_skor
 
 
 # ---- PENCERE (GUI) KISMI ----
@@ -104,13 +96,17 @@ def cevapla():
     giris_kutusu.delete(0, tk.END)
     pencere.update()
 
-    cevap, kaynaklar = soru_sor(soru)
+    cevap, kaynak, skor = soru_sor(soru)
 
     cevap_alani.config(state=tk.NORMAL)
     cevap_alani.insert(tk.END, "🍳 Asistan: ", "asistan_etiket")
     cevap_alani.insert(tk.END, f"{cevap}\n", "asistan_metin")
-    if kaynaklar:
-        cevap_alani.insert(tk.END, f"   (Kaynak: {', '.join(kaynaklar)})\n\n", "kaynak_metin")
+    if kaynak:
+        cevap_alani.insert(
+            tk.END,
+            f"   (Kaynak: {kaynak}, benzerlik: {skor:.2f})\n\n",
+            "kaynak_metin"
+        )
     else:
         cevap_alani.insert(tk.END, "\n")
     cevap_alani.config(state=tk.DISABLED)
@@ -122,7 +118,6 @@ pencere.title("Yemek Pişirme Asistanı")
 pencere.geometry("550x600")
 pencere.configure(bg=ARKA_PLAN)
 
-# ---- ÜST BAŞLIK ALANI ----
 baslik_cercevesi = tk.Frame(pencere, bg=BASLIK_RENGI, height=80)
 baslik_cercevesi.pack(fill=tk.X)
 baslik_cercevesi.pack_propagate(False)
@@ -136,7 +131,6 @@ baslik_etiketi = tk.Label(
 )
 baslik_etiketi.pack(expand=True)
 
-# ---- SOHBET ALANI ----
 cevap_alani = scrolledtext.ScrolledText(
     pencere,
     wrap=tk.WORD,
@@ -149,14 +143,12 @@ cevap_alani = scrolledtext.ScrolledText(
 )
 cevap_alani.pack(padx=15, pady=15, fill=tk.BOTH, expand=True)
 
-# Yazı renklerini tanımlıyoruz (etiketler)
 cevap_alani.tag_config("kullanici_etiket", foreground=KULLANICI_RENGI, font=("Segoe UI", 11, "bold"))
 cevap_alani.tag_config("kullanici_metin", foreground=KULLANICI_RENGI, font=("Segoe UI", 11))
 cevap_alani.tag_config("asistan_etiket", foreground=ASISTAN_RENGI, font=("Segoe UI", 11, "bold"))
 cevap_alani.tag_config("asistan_metin", foreground="#333333", font=("Segoe UI", 11))
 cevap_alani.tag_config("kaynak_metin", foreground="#999999", font=("Segoe UI", 9, "italic"))
 
-# ---- ALT GİRİŞ ALANI ----
 alt_cerceve = tk.Frame(pencere, bg=ARKA_PLAN)
 alt_cerceve.pack(padx=15, pady=(0, 15), fill=tk.X)
 
