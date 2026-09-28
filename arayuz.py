@@ -16,7 +16,7 @@ embedding_model.load()
 embedding_client = embedding_model.get_embedding_client()
 
 # Bu skorun altındaki sonuçlar "alakasız" kabul edilir
-BENZERLIK_ESIGI = 0.30
+BENZERLIK_ESIGI = 0.40
 
 # ---- RENK TEMASI ----
 ARKA_PLAN = "#F1F8F0"
@@ -108,7 +108,11 @@ def cevapla():
             "kaynak_metin"
         )
     else:
-        cevap_alani.insert(tk.END, "\n")
+        cevap_alani.insert(
+            tk.END,
+            f"   (En yakın benzerlik: {skor:.2f}, eşik: {BENZERLIK_ESIGI:.2f})\n\n",
+            "kaynak_metin"
+        )
     cevap_alani.config(state=tk.DISABLED)
     cevap_alani.see(tk.END)
 
